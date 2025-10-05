@@ -110,6 +110,8 @@ from functools import wraps
 from jose import jwt
 from textblob import TextBlob
 import logging
+from functools import lru_cache
+import signal
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -159,49 +161,124 @@ app.config.update(
     JSON_SORT_KEYS=False
 )
 
+# Global lazy model vars
 detector = None
 sentiment_analyzer = None
 embedding_model = None
 nlp = None
 translator = None
 
+SKIP_MODELS = os.environ.get('SKIP_MODELS', 'false').lower() == 'true'
+
 print("\nLoading AI models...")
-try:
-    if CV2_AVAILABLE:
-        detector = FER(mtcnn=False)
-        print("✓ Emotion detector")
-except:
-    print("⚠ Emotion detector skipped")
+if not SKIP_MODELS:
+    # Initial loads with timeouts
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Model load timeout")
 
-try:
-    if TRANSFORMERS_AVAILABLE:
-        sentiment_analyzer = pipeline("sentiment-analysis",
-                                     model="distilbert-base-uncased-finetuned-sst-2-english",
-                                     device=-1)
-        print("✓ Sentiment analyzer")
-except:
-    print("⚠ Sentiment analyzer skipped")
+    try:
+        if CV2_AVAILABLE:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(30)
+            detector = FER(mtcnn=False)
+            signal.alarm(0)
+            print("✓ Emotion detector")
+    except Exception as e:
+        print(f"⚠ Emotion detector skipped: {e}")
 
-try:
-    if EMBEDDINGS_AVAILABLE:
-        embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        print("✓ Embedding model")
-except:
-    print("⚠ Embedding model skipped")
+    try:
+        if TRANSFORMERS_AVAILABLE:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(60)
+            sentiment_analyzer = pipeline("sentiment-analysis",
+                                         model="distilbert-base-uncased-finetuned-sst-2-english",
+                                         device=-1)
+            signal.alarm(0)
+            print("✓ Sentiment analyzer")
+    except Exception as e:
+        print(f"⚠ Sentiment analyzer skipped: {e}")
 
-try:
-    if SPACY_AVAILABLE:
-        nlp = spacy.load('en_core_web_sm')
-        print("✓ SpaCy NLP")
-except:
-    print("⚠ SpaCy skipped")
+    try:
+        if EMBEDDINGS_AVAILABLE:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(60)
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            signal.alarm(0)
+            print("✓ Embedding model")
+    except Exception as e:
+        print(f"⚠ Embedding model skipped: {e}")
 
-try:
-    if TRANSLATOR_AVAILABLE:
-        translator = Translator()
-        print("✓ Translator")
-except:
-    print("⚠ Translator skipped")
+    try:
+        if SPACY_AVAILABLE:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(30)
+            nlp = spacy.load('en_core_web_sm')
+            signal.alarm(0)
+            print("✓ SpaCy NLP")
+    except Exception as e:
+        print(f"⚠ SpaCy skipped: {e}")
+
+    try:
+        if TRANSLATOR_AVAILABLE:
+            translator = Translator()
+            print("✓ Translator")
+    except Exception as e:
+        print(f"⚠ Translator skipped: {e}")
+else:
+    print("🛡️ Skipping model loads (SKIP_MODELS=true)")
+
+# Lazy load functions
+@lru_cache(maxsize=1)
+def get_detector():
+    global detector
+    if detector is None and not SKIP_MODELS and CV2_AVAILABLE:
+        try:
+            detector = FER(mtcnn=False)
+        except Exception as e:
+            logger.error(f"Lazy FER load failed: {e}")
+    return detector
+
+@lru_cache(maxsize=1)
+def get_sentiment_analyzer():
+    global sentiment_analyzer
+    if sentiment_analyzer is None and not SKIP_MODELS and TRANSFORMERS_AVAILABLE:
+        try:
+            sentiment_analyzer = pipeline("sentiment-analysis",
+                                         model="distilbert-base-uncased-finetuned-sst-2-english",
+                                         device=-1)
+        except Exception as e:
+            logger.error(f"Lazy sentiment load failed: {e}")
+    return sentiment_analyzer
+
+@lru_cache(maxsize=1)
+def get_embedding_model():
+    global embedding_model
+    if embedding_model is None and not SKIP_MODELS and EMBEDDINGS_AVAILABLE:
+        try:
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        except Exception as e:
+            logger.error(f"Lazy embedding load failed: {e}")
+    return embedding_model
+
+@lru_cache(maxsize=1)
+def get_nlp():
+    global nlp
+    if nlp is None and not SKIP_MODELS and SPACY_AVAILABLE:
+        try:
+            nlp = spacy.load('en_core_web_sm')
+        except Exception as e:
+            logger.error(f"Lazy SpaCy load failed: {e}")
+    return nlp
+
+@lru_cache(maxsize=1)
+def get_translator():
+    global translator
+    if translator is None and not SKIP_MODELS and TRANSLATOR_AVAILABLE:
+        try:
+            translator = Translator()
+        except Exception as e:
+            logger.error(f"Lazy translator load failed: {e}")
+    return translator
 
 users_db = {}
 profiles_db = {}
@@ -363,7 +440,8 @@ def calculate_skill_match(job_skills, user_skills):
     try:
         if not job_skills or not user_skills:
             return 0
-        if not EMBEDDINGS_AVAILABLE or not embedding_model:
+        emb_model = get_embedding_model()
+        if not emb_model:
             job_set = set(s.lower() for s in job_skills)
             user_set = set(s.lower() for s in user_skills)
             if not job_set:
@@ -374,8 +452,8 @@ def calculate_skill_match(job_skills, user_skills):
         user_clean = [s.strip().lower() for s in user_skills if s.strip()]
         if not job_clean or not user_clean:
             return 0
-        job_emb = embedding_model.encode([' '.join(job_clean)])
-        user_emb = embedding_model.encode([' '.join(user_clean)])
+        job_emb = emb_model.encode([' '.join(job_clean)])
+        user_emb = emb_model.encode([' '.join(user_clean)])
         return max(0, min(100, int(cosine_similarity(job_emb, user_emb)[0][0] * 100)))
     except Exception as e:
         logger.error(f"Skill match error: {e}")
@@ -398,9 +476,10 @@ def analyze_text_advanced(text):
             result['subjectivity'] = float(blob.sentiment.subjectivity)
         except:
             pass
+        nlp_model = get_nlp()
         try:
-            if nlp:
-                doc = nlp(text)
+            if nlp_model:
+                doc = nlp_model(text)
                 result['entities'] = [(ent.text, ent.label_) for ent in doc.ents][:5]
                 result['keywords'] = [token.text for token in doc if token.pos_ in ['NOUN', 'PROPN', 'VERB'] and not token.is_stop][:10]
         except:
@@ -834,7 +913,13 @@ def submit_interview(current_user, job_id):
         if not data:
             return jsonify({'error': 'No data'}), 400
         responses = data.get('responses', [])
-        emotion_scores = data.get('emotion_scores', {})
+        det = get_detector()
+        emotion_scores = {}
+        if det:
+            # Assuming video or image analysis; placeholder for now
+            emotion_scores = {'confidence': 50}  # Mock; integrate real CV if needed
+        else:
+            emotion_scores = {'confidence': 50}
         sentiment_scores = [analyze_text_advanced(r.get('text', ''))['sentiment'] for r in responses]
         keyword_scores = [calculate_keyword_match(r.get('text', ''), r.get('expected_keywords', [])) for r in responses]
         avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0
@@ -990,25 +1075,18 @@ def index():
 if __name__ == '__main__':
     print("\n" + "=" * 70)
     print("SOULCRUIT AI Backend v5.0 Starting...")
+    print(f"SKIP_MODELS: {SKIP_MODELS}")
     print("=" * 70)
     try:
-        # Render sets PORT env var—use it explicitly
         port = int(os.environ.get('PORT', 5000))
         print(f"🚀 Binding Flask to 0.0.0.0:{port} (env PORT={os.environ.get('PORT', 'none')})")
         
-        # Load models here if not skipped—add prints for tracking
-        print("🔄 Loading AI models...")
-        # ... your model loads (detector, sentiment_analyzer, etc.) ...
-        print("✅ Models ready!")
-        
-        print(f"\n{'=' * 70}")
-        print(f"SERVER LIVE ON PORT {port}")
-        print(f"Health: http://0.0.0.0:{port}/api/health")
-        print(f"{'=' * 70}\n")
+        print("✅ Models ready (or skipped)!")
         
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
         print("\nServer stopped")
     except Exception as e:
         print(f"\n🚨 Startup error: {e}")
+        logger.error(f"Startup failed: {e}", exc_info=True)
         raise
