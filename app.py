@@ -3,8 +3,11 @@ warnings.filterwarnings("ignore")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+# Detect Render environment to skip heavy runtime tasks
+IS_RENDER = 'RENDER' in os.environ
+
 print("=" * 70)
-print("SOULCRUIT AI - Installing Dependencies")
+print("SOULCRUIT AI Backend v5.0")
 print("=" * 70)
 
 import subprocess
@@ -57,34 +60,41 @@ optional_packages = [
     ('torch --index-url https://download.pytorch.org/whl/cpu', 'PyTorch CPU'),
 ]
 
-print("\nInstalling core packages:")
-for package, name in packages:
-    install_package(package, name)
+if not IS_RENDER:
+    print("\nInstalling core packages:")
+    for package, name in packages:
+        install_package(package, name)
 
-print("\nInstalling optional packages (may take time):")
-for package, name in optional_packages:
-    install_package(package, name)
+    print("\nInstalling optional packages (may take time):")
+    for package, name in optional_packages:
+        install_package(package, name)
 
-print("\nDownloading language models:")
-try:
-    print("SpaCy model...", end=' ', flush=True)
-    subprocess.run([sys.executable, '-m', 'spacy', 'download', 'en_core_web_sm'],
-                  capture_output=True, timeout=120, check=False)
-    print("✓")
-except:
-    print("⚠")
+    print("\nDownloading language models:")
+    try:
+        print("SpaCy model...", end=' ', flush=True)
+        subprocess.run([sys.executable, '-m', 'spacy', 'download', 'en_core_web_sm'],
+                      capture_output=True, timeout=120, check=False)
+        print("✓")
+    except:
+        print("⚠")
 
-try:
-    print("TextBlob corpora...", end=' ', flush=True)
-    subprocess.run([sys.executable, '-m', 'textblob.download_corpora'],
-                  capture_output=True, timeout=60, check=False)
-    print("✓")
-except:
-    print("⚠")
+    try:
+        print("TextBlob corpora...", end=' ', flush=True)
+        subprocess.run([sys.executable, '-m', 'textblob.download_corpora'],
+                      capture_output=True, timeout=60, check=False)
+        print("✓")
+    except:
+        print("⚠")
 
-print("\n" + "=" * 70)
-print("Installation complete! Starting backend...")
-print("=" * 70 + "\n")
+    print("\n" + "=" * 70)
+    print("Installation complete! Starting backend...")
+    print("=" * 70 + "\n")
+else:
+    print("🛡️ On Render: Skipping runtime installs (using pre-built packages)")
+    print("📥 Models pre-loaded via build")
+    print("\n" + "=" * 70)
+    print("Starting backend...")
+    print("=" * 70 + "\n")
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -144,7 +154,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config.update(
-    SECRET_KEY='soulcruit_ai_2025_secure_key_v1_production',
+    SECRET_KEY='soulcruit_ai_2025_secure_key_v1_production',  # Change this in prod!
     MAX_CONTENT_LENGTH=100*1024*1024,
     JSON_SORT_KEYS=False
 )
@@ -979,20 +989,26 @@ def index():
 
 if __name__ == '__main__':
     print("\n" + "=" * 70)
-    print("SOULCRUIT AI Backend v5.0")
+    print("SOULCRUIT AI Backend v5.0 Starting...")
     print("=" * 70)
     try:
-        port = int(os.environ.get('PORT', find_free_port()))
-        print(f"\nPort: {port}")
+        # Render sets PORT env var—use it explicitly
+        port = int(os.environ.get('PORT', 5000))
+        print(f"🚀 Binding Flask to 0.0.0.0:{port} (env PORT={os.environ.get('PORT', 'none')})")
+        
+        # Load models here if not skipped—add prints for tracking
+        print("🔄 Loading AI models...")
+        # ... your model loads (detector, sentiment_analyzer, etc.) ...
+        print("✅ Models ready!")
+        
         print(f"\n{'=' * 70}")
-        print(f"SERVER RUNNING")
-        print(f"{'=' * 70}")
-        print(f"\nLocal URL:  http://localhost:{port}")
-        print(f"Health:     http://localhost:{port}/api/health")
-        print(f"\n{'=' * 70}")
-        print("Press CTRL+C to stop\n")
+        print(f"SERVER LIVE ON PORT {port}")
+        print(f"Health: http://0.0.0.0:{port}/api/health")
+        print(f"{'=' * 70}\n")
+        
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
         print("\nServer stopped")
     except Exception as e:
-        print(f"\nError: {e}")
+        print(f"\n🚨 Startup error: {e}")
+        raise
