@@ -1,0 +1,16 @@
+flask
+flask-cors
+bcrypt
+python-jose[cryptography]
+numpy
+pandas
+scikit-learn
+textblob
+pillow
+sentence-transformers
+spacy
+googletrans==4.0.0-rc1
+opencv-python-headless
+fer
+transformers
+torch
