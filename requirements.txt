@@ -1,1 +1,18 @@
-
+Flask
+Flask-CORS
+bcrypt
+python-jose[cryptography]
+numpy
+pandas
+scikit-learn
+textblob
+Pillow
+sentence-transformers
+spacy
+googletrans==4.0.0-rc1
+opencv-python-headless
+fer
+transformers
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+gunicorn==23.0.0
