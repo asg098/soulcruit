@@ -8,7 +8,6 @@ IS_RENDER = 'RENDER' in os.environ
 print("=" * 70)
 print("SOULCRUIT AI Backend v5.1 (Improved for Render)")
 print("=" * 70)
-
 import subprocess
 import sys
 import time
