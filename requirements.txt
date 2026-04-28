@@ -16,8 +16,3 @@ transformers
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 gunicorn==23.0.0
-
-
-
-
-
