@@ -11,7 +11,6 @@ print("=" * 70)
 import subprocess
 import sys
 import time
-
 def install_package(package, display_name=None):
     if display_name is None:
         display_name = package.split('==')[0]
